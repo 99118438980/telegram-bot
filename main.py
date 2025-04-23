@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -18,8 +18,9 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-user_state = {}  # user_id -> "anon" / "open"
+user_state = {}  # user_id -> "anon" / "open" / "feedback"
 question_map = {}  # admin_msg_id -> {user_id, mode}
+
 
 def get_keyboard():
     kb = InlineKeyboardBuilder()
@@ -28,17 +29,39 @@ def get_keyboard():
     kb.adjust(1)
     return kb.as_markup()
 
+
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
     await message.answer(
         "<b>Ассаляму алейкум ва рахматуЛлахи ва баракатуху ✨</b>\n\n"
-        "Добро пожаловать в наш бот — <i>место, где вы можете получить достоверный ответ , мудрый совет и наставление</i> от уважаемых имамов преподавателей.\n\n"
+        "Добро пожаловать в наш бот — <i>место, где вы можете получить достоверный ответ , мудрый совет и наставление</i> от уважаемых имамов и преподавателей.\n\n"
         "<b>Выберите формат вопроса:</b>\n"
         "📩 — <b>Анонимно</b>\n"
         "✉️ — <b>Открыто</b> (с именем)\n\n"
         "<i>Пусть Аллах сделает этот проект благом для Уммы!</i>",
         reply_markup=get_keyboard()
     )
+
+
+@dp.message(Command("ask"))
+async def ask_command(message: types.Message):
+    user_state[message.from_user.id] = "anon"  # по умолчанию анонимно
+    await message.answer(
+        "✍️ <b>Вы можете задать свой вопрос. Он будет передан наставникам анонимно.</b>\n"
+        "Если вы хотите указать имя, используйте /start и выберите «Открыто».\n\n"
+        "<i>Пусть Аллах даст благословит вас за ваш вопрос сделает ответ полезным.</i>"
+    )
+
+
+@dp.message(Command("feedback"))
+async def feedback_command(message: types.Message):
+    user_state[message.from_user.id] = "feedback"
+    await message.answer(
+        "✨ <b>Напишите свои пожелание , предложение или совет для нашей команды.</b>\n"
+        "Мы стараемся улучшаться, и ваши слова важны для нас.\n\n"
+        "<i>Пусть Аллах вознаградит вас за искренность и заботу об умме!</i>"
+    )
+
 
 @dp.callback_query(F.data.in_({"ask_anon", "ask_open"}))
 async def mode_selected(callback: types.CallbackQuery):
@@ -50,9 +73,28 @@ async def mode_selected(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+
 @dp.message()
 async def handle_messages(message: types.Message):
     user_id = message.from_user.id
+
+    # Обработка фидбэка
+    if user_id in user_state and user_state[user_id] == "feedback":
+        user_state.pop(user_id)
+        for admin_id in ADMIN_IDS:
+            try:
+                caption = (
+                    f"💬 <b>Новый отзыв / сообщение от {message.from_user.full_name}:</b>\n\n"
+                    f"{message.text}"
+                )
+                await bot.send_message(admin_id, caption)
+            except Exception as e:
+                logging.error(f"Ошибка при отправке фидбэка админу {admin_id}: {e}")
+        await message.answer(
+            "✅ <b>Спасибо за ваш отзыв!</b>\n"
+            "Мы обязательно прочитаем и учтём, ин ша Аллах."
+        )
+        return
 
     # Ответ от администратора
     if message.reply_to_message and user_id in ADMIN_IDS:
@@ -106,6 +148,7 @@ async def handle_messages(message: types.Message):
         await message.answer(
             "⚠️ <b>Сначала нажмите /start и выберите формат вопроса.</b>"
         )
+
 
 async def main():
     await dp.start_polling(bot)
